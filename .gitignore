@@ -1,0 +1,41 @@
+# ---- Python / venv ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+env/
+**/venv/
+**/.venv/
+**/env/
+
+# ---- VS Code / IDE ----
+.vscode/
+.idea/
+
+# ---- Data (não versionar) ----
+data/**/*.csv
+data/**/*.json
+data/**/*.zip
+data/**/*.parquet
+data/**/*.feather
+data/**/*.xlsx
+data/**/*.xls
+
+# Diretórios específicos (mantidos com .gitkeep se quiser)
+data/raw/
+data/interim/
+data/processed/
+!data/**/.gitkeep
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+
+# ---- Streamlit cache ----
+.streamlit/
+*/cache/
+**/.cache/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
