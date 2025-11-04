@@ -1,59 +1,108 @@
-import sys, os, glob
-from pyspark.sql import functions as F
-from app.utils.io import spark
+import sys, json, re, ast
+import pandas as pd
+from pathlib import Path
+from app.utils.paths import RAW, PROCESSED, ensure_dirs
+from app.utils.io_safe import read_csv_safe, write_parquet_safe
+from app.utils.log import log
+from app.utils.generations import add_generation_col
 
-def _expand_inputs(pattern: str):
-    if any(ch in pattern for ch in ["*", "?", "["]):
-        files = glob.glob(pattern)
-    elif os.path.isdir(pattern):
-        files = [os.path.join(pattern, f) for f in os.listdir(pattern) if f.lower().endswith(".csv")]
+REQUIRED_COLS = ["artist", "track_name", "year", "streams"]
+
+def _parse_artists_first(value):
+    if pd.isna(value):
+        return None
+    s = str(value).strip()
+
+    try:
+        val = ast.literal_eval(s)
+        if isinstance(val, list) and len(val) > 0:
+            return str(val[0]).strip()
+        if isinstance(val, str):
+            return val.strip()
+    except Exception:
+        pass
+
+    s = s.strip("[]")
+    if "," in s:
+        s = s.split(",")[0]
+    return s.strip(" '\"")
+
+def _extract_year_from_release_date(series: pd.Series) -> pd.Series:
+    s = series.astype(str).str.extract(r"(19\d{2}|20\d{2})", expand=False)
+    return pd.to_numeric(s, errors="coerce").astype("Int64")
+
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    cols = {c.lower().strip(): c for c in df.columns}
+
+    if "artists" in cols and "artist" not in df.columns:
+        df["artist"] = df[cols["artists"]].apply(_parse_artists_first)
+    elif "artist" in cols:
+        df["artist"] = df[cols["artist"]]
     else:
-        files = [pattern]
-    if not files:
-        raise FileNotFoundError(f"Nenhum CSV para: {pattern}")
-    return [f.replace("\\", "/") for f in files]
+        df["artist"] = None
 
-def _extract_year_from(colname: str):
-    return F.regexp_extract(F.col(colname).cast("string"), r"(\d{4})", 1).cast("int")
-
-def _split_artist_ids(colname: str):
-    s = F.regexp_replace(F.col(colname).cast("string"), r"[\[\]'\" ]", "")
-    return F.split(s, r",")
-
-def main(input_csv: str, out_parquet: str):
-    sp = spark("ETL_Tracks")
-
-    files = _expand_inputs(input_csv)
-    df = (sp.read.option("header", True).option("inferSchema", True).csv(files))
-
-    df = df.withColumnRenamed("name", "track_name")
-
-    df = df.withColumn("year", _extract_year_from("release_date"))
-
-    df = df.withColumn("artist_ids", _split_artist_ids("id_artists"))
-    df = df.withColumn("artist_id", F.explode(F.col("artist_ids")))
-    df = df.drop("artist_ids")
-
-    df = (df.withColumn("track_name", F.trim("track_name"))
-            .withColumn("artist_id", F.trim("artist_id"))
-            .filter(F.col("artist_id").isNotNull() & (F.col("artist_id") != "")))
-
-    total = df.count()
-    with_year = df.filter(F.col("year").isNotNull()).count()
-    print(f"[TRACKS ETL] linhas pós-explode: {total} | com year: {with_year}")
-
-    if with_year == 0:
-        print("[TRACKS ETL] Atenção: 'year' não encontrado; gravando sem particionamento.")
-        df.write.mode("overwrite").parquet(out_parquet)
+    if "name" in cols:
+        df["track_name"] = df[cols["name"]]
+    elif "track" in cols or "track_name" in cols or "title" in cols:
+        for k in ("track_name", "track", "title"):
+            if k in cols:
+                df["track_name"] = df[cols[k]]
+                break
     else:
-        (df.filter(F.col("year").isNotNull())
-            .repartition(8, "year")
-            .write.mode("overwrite")
-            .partitionBy("year")
-            .parquet(out_parquet))
+        df["track_name"] = None
 
-    print(f"[TRACKS ETL] escrito em: {out_parquet}")
-    sp.stop()
+    if "release_date" in cols:
+        df["year"] = _extract_year_from_release_date(df[cols["release_date"]])
+    else:
+        year_col = next((c for c in df.columns if "year" in str(c).lower()), None)
+        if year_col:
+            df["year"] = pd.to_numeric(df[year_col], errors="coerce").astype("Int64")
+        else:
+            df["year"] = pd.Series([None] * len(df), dtype="Int64")
+
+    if "popularity" in cols:
+        streams = pd.to_numeric(df[cols["popularity"]], errors="coerce").fillna(0)
+        if streams.sum() == 0:
+            streams = pd.Series([1] * len(df))
+    else:
+        streams = pd.Series([1] * len(df))
+    df["streams"] = streams.astype("int64", errors="ignore")
+
+    df["platform"] = "spotify"
+
+    df["artist"] = df["artist"].astype("string").fillna("Unknown Artist").str.strip()
+    df["track_name"] = df["track_name"].astype("string").fillna("Unknown Track").str.strip()
+
+    before = len(df)
+    filtered = df[df["year"].between(1921, 2020, inclusive="both")]
+    if len(filtered) == 0 and df["year"].notna().any():
+        log("Aviso: nenhum registro caiu no range 1921–2020; mantendo todos com YEAR válido.")
+        df2 = df[df["year"].notna()].copy()
+    else:
+        removed = before - len(filtered)
+        log(f"Removidas {removed} linhas fora de 1921–2020 ou sem 'year' válido")
+        df2 = filtered.copy()
+
+    df2 = add_generation_col(df2, year_col="year", out_col="generation", mode="decade")
+    df2["generation"] = df2["generation"].fillna("unknown")
+
+    for col in REQUIRED_COLS:
+        if col not in df2.columns:
+            df2[col] = None
+
+    return df2
+
+def main(in_csv: str, out_dir: str):
+    ensure_dirs()
+    df = read_csv_safe(in_csv)
+    df = _normalize_columns(df)
+
+    out_parquet = Path(out_dir) / "tracks.parquet"
+    write_parquet_safe(df, out_parquet)
+    log(f"[TRACKS ETL] ok: linhas={len(df)} | cols={list(df.columns)}")
 
 if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        print("Uso: python -m app.jobs.extract_tracks_to_parquet <data/raw/tracks.csv> <data/processed/>")
+        sys.exit(1)
     main(sys.argv[1], sys.argv[2])
