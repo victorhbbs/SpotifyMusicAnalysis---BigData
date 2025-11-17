@@ -1,9 +1,21 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+from app.utils.paths import REPORTS_DIR, FIGURES_DIR
 from pathlib import Path
 import sys
 
 PROCESSED = Path(__file__).resolve().parents[2] / "data" / "processed"
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = BASE_DIR / "data"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
+FIGURES_DIR = PROCESSED_DATA_DIR / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_genre_share():
+    csv_path = PROCESSED_DATA_DIR / "genre_share_by_generation.csv"
+    df = pd.read_csv(csv_path)
+    return df.sort_values("generation")
 
 def _order_decades(values):
     def to_int(v):
@@ -94,6 +106,52 @@ def plot_top_artists_by_generation(top_n=10):
         print("[dashboard] Nenhuma década possui dados para top artistas. Veja amostra:")
         print(df.head(10).to_string(index=False))
 
+def plot_genre_share_stacked():
+    df = load_genre_share()
+    df_plot = df.set_index("generation")
+
+    ax = df_plot.plot(kind="bar", stacked=True, figsize=(12, 6))
+    ax.set_ylabel("Participação na geração (%)")
+    ax.set_xlabel("Geração / Década")
+    ax.set_title("Composição de gêneros por geração")
+    plt.tight_layout()
+
+    out_png = FIGURES_DIR / "genre_share_stacked.png"
+    plt.savefig(out_png, dpi=120)
+    plt.close()
+    print(f"Gráfico salvo em: {out_png}")
+
+def plot_genre_trend(genre: str):
+    df = load_genre_share()
+    if genre not in df.columns:
+        print(f"Gênero {genre} não encontrado nas colunas do CSV.")
+        return
+
+    ax = df.plot(
+        x="generation",
+        y=genre,
+        kind="line",
+        marker="o",
+        figsize=(10, 4),
+    )
+    ax.set_ylabel("Participação na geração (%)")
+    ax.set_xlabel("Geração / Década")
+    ax.set_title(f"Evolução do gênero {genre} por geração")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    out_png = FIGURES_DIR / f"genre_trend_{genre.lower()}.png"
+    plt.savefig(out_png, dpi=120)
+    plt.close()
+    print(f"Gráfico salvo: {out_png}")
+
+
+
 if __name__ == "__main__":
     plot_generation_platform()
     plot_top_artists_by_generation()
+
+    plot_genre_share_stacked()
+
+    for g in ["Pop", "Rock", "Rap", "Funk", "Electronic", "Other"]:
+        plot_genre_trend(g)

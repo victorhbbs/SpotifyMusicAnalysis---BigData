@@ -1,9 +1,20 @@
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data"
-RAW = DATA / "raw"
-PROCESSED = DATA / "processed"
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-def ensure_dirs():
-    PROCESSED.mkdir(parents=True, exist_ok=True)
+DATA_DIR = BASE_DIR / "data"
+
+RAW_DATA_DIR      = DATA_DIR / "raw"
+INTERIM_DATA_DIR  = DATA_DIR / "interim"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
+
+REPORTS_DIR = PROCESSED_DATA_DIR
+
+FIGURES_DIR = REPORTS_DIR / "figures"
+
+TRACKS_RAW_CSV              = RAW_DATA_DIR / "tracks.csv"
+TRACKS_PARQUET              = PROCESSED_DATA_DIR / "tracks_parquet"
+SPOTIFY_WITH_CLUSTERS_CSV   = PROCESSED_DATA_DIR / "spotify_with_clusters.csv"
+
+for d in [RAW_DATA_DIR, INTERIM_DATA_DIR, PROCESSED_DATA_DIR, REPORTS_DIR, FIGURES_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
