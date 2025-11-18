@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 from app.utils.paths import PROCESSED_DATA_DIR, REPORTS_DIR
 
+# converte um ano em geração/década
 def year_to_generation(year: int) -> str:
     """
     Converte um ano (ex: 1995) em uma 'geração/década' em string (ex: '1990s').
@@ -17,7 +18,7 @@ def year_to_generation(year: int) -> str:
     decade = (y // 10) * 10
     return f"{decade}s"
 
-
+# converte um gênero bruto em um macro-gênero padronizado
 def map_macro_genre(raw_genre: str) -> str:
     if not isinstance(raw_genre, str):
         return "Other"
@@ -38,8 +39,9 @@ def map_macro_genre(raw_genre: str) -> str:
 
     return "Other"
 
-
+# função principal do job
 def main():
+    # lê o dataset processado com clusters
     file = PROCESSED_DATA_DIR / "spotify_with_clusters.csv"
     if not file.exists():
         raise SystemExit(f"Arquivo não encontrado: {file}")
@@ -47,11 +49,13 @@ def main():
     print(f"Lendo: {file}")
     df = pd.read_csv(file)
 
+    # verifica se as colunas necessárias existem
     required = {"genre", "year"}
     missing = required - set(df.columns)
     if missing:
         raise SystemExit(f"Colunas ausentes no CSV: {missing}")
 
+    # prepara dados para cálculo de participação por geração
     df["year"] = df["year"].astype(int)
     df["generation"] = df["year"].apply(year_to_generation)
 
@@ -63,9 +67,11 @@ def main():
           .reset_index(name="count")
     )
 
+    # calcula porcentagens
     counts["total"] = counts.groupby("generation")["count"].transform("sum")
     counts["pct"] = (counts["count"] / counts["total"]) * 100
 
+    # cria tabela pivot com gerações como índice e macro-gêneros como colunas
     pivot = (
         counts
         .pivot(index="generation", columns="macro_genre", values="pct")
@@ -73,6 +79,7 @@ def main():
         .sort_index()
     )
 
+    # garante que a pasta de saída existe
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     out = REPORTS_DIR / "genre_share_by_generation.csv"
     pivot.to_csv(out, float_format="%.2f")

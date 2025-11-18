@@ -3,11 +3,17 @@ from pathlib import Path
 from .log import log
 
 def read_csv_safe(path, **kwargs) -> pd.DataFrame:
+    # converte o caminho recebido em Path
     p = Path(path)
+
+    # verifica se o arquivo existe
     if not p.exists():
         raise FileNotFoundError(f"Arquivo não encontrado: {p}")
 
+    # lista com as tentativas realizadas
     tried = []
+
+    # tenta ler o CSV com diferentes separadores e codificações        
     for sep in [",", ";", "\t"]:
         for enc in ["utf-8", "latin-1"]:
             try:
@@ -19,6 +25,7 @@ def read_csv_safe(path, **kwargs) -> pd.DataFrame:
                 tried.append((sep, enc, str(e)[:80]))
     raise ValueError(f"Falha ao ler CSV. Tentativas: {tried[:3]} ...")
 
+# grava DataFrame em Parquet, com fallback para CSV em caso de falha
 def write_parquet_safe(df, path: str):
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
