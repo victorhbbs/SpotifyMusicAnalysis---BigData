@@ -108,15 +108,17 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     return df2
 
+# função principal do job
 def main(in_csv: str, out_dir: str):
-    ensure_dirs()
-    df = read_csv_safe(in_csv)
-    df = _normalize_columns(df)
+    ensure_dirs()  # garante que pastas RAW e PROCESSED existam
+    df = read_csv_safe(in_csv) # lê CSV bruto
+    df = _normalize_columns(df) # normaliza colunas
 
     out_parquet = Path(out_dir) / "tracks.parquet"
     write_parquet_safe(df, out_parquet)
     log(f"[TRACKS ETL] ok: linhas={len(df)} | cols={list(df.columns)}")
 
+# roda via linha de comando
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Uso: python -m app.jobs.extract_tracks_to_parquet <data/raw/tracks.csv> <data/processed/>")
