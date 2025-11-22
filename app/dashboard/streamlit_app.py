@@ -53,22 +53,40 @@ def load_top_artists_by_gen():
 # ========== MACRO-GÊNERO ==========
 
 def map_macro_genre(raw_genre: str) -> str:
-    # Converte o gênero original em um "macro-gênero" padronizado
     if not isinstance(raw_genre, str):
         return "Other"
+
     g = raw_genre.lower()
+
+    # Pop
     if "pop" in g:
         return "Pop"
-    if "rock" in g:
-        return "Rock"
+
+    # Latin
+    if "latin" in g or "latino" in g or "reggaeton" in g or "salsa" in g or "bachata" in g:
+        return "Latin"
+
+    # Boy band
+    if "boy band" in g or "boyband" in g or "k-pop" in g or "kpop" in g:
+        return "Boy Band"
+
+    # Rap / Hip hop
     if "hip hop" in g or "rap" in g or "trap" in g:
         return "Rap"
-    if "funk" in g:
-        return "Funk"
+
+    # Rock
+    if "rock" in g:
+        return "Rock"
+
+    # Electronic
     if ("electro" in g or "house" in g or "techno" in g or
         "edm" in g or "dance" in g):
         return "Electronic"
-    # Se não cair em nenhuma categoria, classifica como "Other"
+
+    # Funk brasileiro
+    if "funk" in g:
+        return "Funk"
+
     return "Other"
 
 
@@ -87,64 +105,101 @@ def main():
     with tab_genres:
         st.header("Composição de gêneros por geração")
 
-        # Carrega a tabela de participação de gêneros por geração
-        st.markdown("#### Evolução dos gêneros selecionados (por ano)")
+    # ====== TABELA POR GERAÇÃO (DEIXA COMO ESTÁ) ======
+    df_share = load_genre_share()
+    st.markdown("Tabela de percentuais por geração (macro-gêneros):")
+    st.dataframe(df_share, use_container_width=True)
 
-        # Carrega o dataset detalhado com faixas
-        df_tracks = load_tracks_with_clusters()
-        df_tracks["year"] = df_tracks["year"].astype(int)
-        df_tracks["macro_genre"] = df_tracks["genre"].apply(map_macro_genre)
+    # ====== GRÁFICO DE EVOLUÇÃO POR ANO (2010–2019) ======
+    st.markdown("#### Evolução dos gêneros selecionados (por ano)")
 
-        # Agrupa por ano + macro_gênero e calcula percentual por ano
-        year_counts = (
-            df_tracks
-            .groupby(["year", "macro_genre"])
-            .size()
-            .reset_index(name="count")
+    # usamos o dataset detalhado
+    df_tracks = load_tracks_with_clusters()
+    df_tracks["year"] = df_tracks["year"].astype(int)
+    df_tracks["macro_genre"] = df_tracks["genre"].apply(map_macro_genre)
+
+    # agrega por ano + macro_gênero e calcula percentual
+    year_counts = (
+        df_tracks
+        .groupby(["year", "macro_genre"])
+        .size()
+        .reset_index(name="count")
+    )
+    year_counts["total"] = year_counts.groupby("year")["count"].transform("sum")
+    year_counts["pct"] = (year_counts["count"] / year_counts["total"]) * 100
+
+    # pivot: linhas = ano, colunas = macro-gêneros, valores = %
+    pivot_year = (
+        year_counts
+        .pivot(index="year", columns="macro_genre", values="pct")
+        .fillna(0)
+        .sort_index()
+    )
+
+    # evita aparecer 2,010 / 2,019 no eixo X
+    pivot_year.index = pivot_year.index.astype(str)
+
+    # opções do multiselect
+    all_genres = list(pivot_year.columns)
+    default_genres = [g for g in ["Pop", "Rock", "Rap", "Electronic", "Other", "Latin", "Boy Band"] if g in all_genres]
+
+    selected = st.multiselect(
+        "Escolha os gêneros:",
+        options=all_genres,
+        default=default_genres or all_genres[:3],
+    )
+
+    if selected:
+        st.line_chart(pivot_year[selected])
+
+    st.divider()
+
+    # ====== AQUI ENTRA O BLOCO DE DETALHE POR ANO COM FILTROS (o que você já montou) ======
+    st.markdown("### Detalhe por ano para um macro-gênero")
+
+    # se quiser reaproveitar o df_tracks já carregado acima, pode comentar estas duas linhas:
+    # df_tracks = load_tracks_with_clusters()
+    # df_tracks["year"] = df_tracks["year"].astype(int)
+
+    df_tracks["macro_genre"] = df_tracks["genre"].apply(map_macro_genre)
+
+    genres_available = sorted(df_tracks["macro_genre"].unique().tolist())
+    genre_choice = st.selectbox("Selecione um macro-gênero", genres_available)
+
+    sub = df_tracks[df_tracks["macro_genre"] == genre_choice]
+
+    if sub.empty:
+        st.info(f"Nenhuma faixa encontrada para o gênero '{genre_choice}'.")
+    else:
+        year_min = int(sub["year"].min())
+        year_max = int(sub["year"].max())
+        year_range = st.slider(
+            "Faixa de anos",
+            min_value=year_min,
+            max_value=year_max,
+            value=(year_min, year_max),
         )
+        sub = sub[sub["year"].between(year_range[0], year_range[1])]
 
-        year_counts["total"] = year_counts.groupby("year")["count"].transform("sum")
-        year_counts["pct"] = (year_counts["count"] / year_counts["total"]) * 100
+        if "pop" in sub.columns:
+            pop_min = int(sub["pop"].min())
+            pop_max = int(sub["pop"].max())
+            pop_range = st.slider(
+                "Popularidade (0–100)",
+                min_value=0,
+                max_value=100,
+                value=(pop_min, pop_max),
+            )
+            sub = sub[sub["pop"].between(pop_range[0], pop_range[1])]
 
-        # Tabela pivot: linhas = ano, colunas = macro_gêneros, valores = %
-        pivot_year = (
-            year_counts
-            .pivot(index="year", columns="macro_genre", values="pct")
-            .fillna(0)
-            .sort_index()
-        )
+        artists = ["(Todos)"] + sorted(sub["artist"].dropna().unique().tolist())
+        artist_choice = st.selectbox("Filtrar por artista", artists)
+        if artist_choice != "(Todos)":
+            sub = sub[sub["artist"] == artist_choice]
 
-        pivot_year.index = pivot_year.index.astype(str)
-
-        selected = st.multiselect(
-            "Escolha os gêneros:",
-            options=[c for c in pivot_year.columns],
-            default=[g for g in ["Pop", "Rock", "Rap", "Electronic", "Other"] if g in pivot_year.columns],
-        )
-
-        if selected:
-            chart_data = pivot_year[selected]
-            st.line_chart(chart_data)
-
-        st.divider()
-        st.markdown("#### Detalhe por ano para um macro-gênero")
-
-        # Carrega faixas com clusters para detalhar um macro-gênero
-        df_tracks = load_tracks_with_clusters()
-        df_tracks["year"] = df_tracks["year"].astype(int)
-        # Cria coluna de macro-gênero a partir do gênero original
-        df_tracks["macro_genre"] = df_tracks["genre"].apply(map_macro_genre)
-
-        # Lista de macro-gêneros disponíveis
-        genres_available = sorted(df_tracks["macro_genre"].unique().tolist())
-        genre_choice = st.selectbox("Selecione um macro-gênero", genres_available)
-
-        # Filtra apenas as faixas daquele macro-gênero
-        sub = df_tracks[df_tracks["macro_genre"] == genre_choice]
         if sub.empty:
-            st.info(f"Nenhuma faixa encontrada para o gênero '{genre_choice}'.")
+            st.info("Nenhuma faixa encontrada com esses filtros.")
         else:
-            # Conta quantas faixas por ano naquele macro-gênero
             year_counts = (
                 sub.groupby("year")
                    .size()
@@ -152,12 +207,9 @@ def main():
                    .sort_values("year")
                    .set_index("year")
             )
-
-            # Gráfico de barras com o número de faixas por ano
             st.bar_chart(year_counts["n_tracks"], height=250)
 
-            # Tabela com as faixas mais populares daquele macro-gênero
-            st.markdown("Faixas mais populares nesse gênero:")
+            st.markdown("Faixas mais populares nesse recorte:")
             st.dataframe(
                 sub[["track_name", "artist", "year", "genre", "pop"]]
                 .sort_values("pop", ascending=False)
@@ -230,7 +282,7 @@ def main():
                     break
 
             # coluna de score/popularidade
-            for cand in ["mean_popularity", "popularity", "score", "media_pop"]:
+            for cand in ["total_streams", "mean_popularity", "popularity", "score", "media_pop"]:
                 if cand in df_top.columns:
                     score_col = cand
                     break

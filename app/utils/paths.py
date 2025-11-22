@@ -25,6 +25,10 @@ TRACKS_RAW_CSV              = RAW_DATA_DIR / "tracks.csv"
 TRACKS_PARQUET              = PROCESSED_DATA_DIR / "tracks_parquet"
 SPOTIFY_WITH_CLUSTERS_CSV   = PROCESSED_DATA_DIR / "spotify_with_clusters.csv"
 
+RAW = RAW_DATA_DIR
+INTERIM = INTERIM_DATA_DIR
+PROCESSED = PROCESSED_DATA_DIR
+
 # garante que os diretórios existem
 for d in [RAW_DATA_DIR, INTERIM_DATA_DIR, PROCESSED_DATA_DIR, REPORTS_DIR, FIGURES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
